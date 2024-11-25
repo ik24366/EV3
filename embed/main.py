@@ -7,6 +7,7 @@ from pybricks.robotics import DriveBase
 from pybricks.messaging import BluetoothMailboxServer, TextMailbox
 
 
+
 # Initialize EV3
 ev3 = EV3Brick()
 motor_left = Motor(Port.A)
@@ -89,15 +90,24 @@ calibrated_colors = {
     'red': {'sensor1': None, 'sensor2': None}
 }
 
-# Bluetooth setup
-server = BluetoothMailboxServer()
-command_mbox = TextMailbox('command', server)
 
-# Wait for connection from the leader
-ev3.screen.print("Waiting for leader...")
-server.wait_for_connection()
+# Bluetooth setup
+SERVER_NAME = 'ev3-momo'  # Replace with the follower's Bluetooth name
+client = BluetoothMailboxClient()
+command_mbox = TextMailbox('command', client)
+
+# Connect to the follower
+ev3.screen.print("Connecting to follower...")
+client.connect(SERVER_NAME)
 ev3.screen.clear()
-ev3.screen.print("Connected to leader!")
+ev3.screen.print("Connected to follower!")
+
+
+# Commands sent to follower
+def send_command(command):
+    command_mbox.send(command)
+    ev3.screen.print("Command sent: " + command)
+
 
 # Calibration function
 def calibrate_colors():
@@ -220,6 +230,7 @@ def handle_green(sensor1_rgb, sensor2_rgb):
 
 # Handle blue color detection
 def handle_blue(sensor_rgb, is_left_sensor):
+    send_command("Dblue")  # Send the blue detection command to the follower
     sensor = 'sensor1' if is_left_sensor else 'sensor2'
     calibrated_rgb = calibrated_colors['blue'][sensor]
     if is_color_match(sensor_rgb, calibrated_rgb, BLUE_WEIGHTS, BLUE_TOLERANCE):
@@ -232,6 +243,7 @@ def handle_blue(sensor_rgb, is_left_sensor):
 
 # Handle yellow color detection
 def handle_yellow(sensor_rgb, is_left_sensor):
+    send_command("Dyellow")  # Send the yellow detection command to the follower
     global red_stopwatch
     sensor = 'sensor1' if is_left_sensor else 'sensor2'
     calibrated_rgb = calibrated_colors['yellow'][sensor]
@@ -281,6 +293,7 @@ def handle_lane_switch():
 
 def switch_lane():
     global lane
+    send_command("SL")  # Send the lane switch command to the follower
     if lane == 'LEFT':
         # Smooth turn to the right
         robot.drive(slspeed, (turn_rate - SLT))  # Slow down slightly for smoother turn
@@ -408,26 +421,34 @@ calibrate_colors()
 # Main loop
 while True:
 
-    # Wait for a command from the leader
-    ev3.screen.print("Waiting for command...")
-    command_mbox.wait()  # Block until a command is received
-    command = command_mbox.read()
-    ev3.screen.clear()
-    ev3.screen.print("Command received: " + command)
+        # Check for commands from the leader
+    if command_mbox.readable():
+        command = command_mbox.read()
+        ev3.screen.clear()
+        ev3.screen.print("Command: " + command)
 
-    # Handle the received command
-    if command == "SL":
-        ev3.screen.print("Switching lane...")
-        switch_lane()
-    elif command == "Dblue":
-        ev3.screen.print("Handling blue...")
-        handle_blue()
-    elif command == "Dyellow":
-        ev3.screen.print("Handling yellow...")
-        handle_yellow()
-    else:
-        ev3.screen.print("Unknown command: " + command)
+        # Handle "SWITCH_LANE" command
+        if command == "SL":
+            ev3.screen.print("Switching lane...")
+            switch_lane()
 
+        # Handle "DETECT_BLUE" command
+        elif command == "Dblue":
+            ev3.screen.print("Detecting blue...")
+            # Call handle_blue logic directly for autonomous behavior
+            rgb1 = color_sensor1.rgb()
+            rgb2 = color_sensor2.rgb()
+            handle_blue(rgb1, True)
+            handle_blue(rgb2, False)
+
+        # Handle "DETECT_YELLOW" command
+        elif command == "Dyellow":
+            ev3.screen.print("Detecting yellow...")
+            # Call handle_yellow logic directly for autonomous behavior
+            rgb1 = color_sensor1.rgb()
+            rgb2 = color_sensor2.rgb()
+            handle_yellow(rgb1, True)
+            handle_yellow(rgb2, False)
 
         continue  # Skip to the next iteration after processing command
 
