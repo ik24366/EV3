@@ -9,17 +9,17 @@ from pybricks.tools import wait
 
 # Create your objects here.
 ev3 = EV3Brick()
-left_motor = Motor(Port.B)
-right_motor = Motor(Port.C)
+left_motor = Motor(Port.A)
+right_motor = Motor(Port.B)
 robot = DriveBase(left_motor, right_motor, wheel_diameter=56, axle_track=114)
 
 # Establish Bluetooth connection
 client = BluetoothMailboxClient()
 mbox = TextMailbox('actions', client)
 
-print('Connecting to server...')
-client.connect('ev3-server')  # Replace 'ev3-server' with the server EV3's Bluetooth name
-print('Connected!')
+ev3.screen.print('Connecting to server...')
+client.connect('ev3-euiyeon')  # Replace 'ev3-server' with the server EV3's Bluetooth name
+ev3.screen.print('Connected!')
 
 BASE_SPEED = 170
 SLOW_SPEED = BASE_SPEED // 2
@@ -38,20 +38,22 @@ def execute_action(action):
     elif action == "stop":
         robot.stop()
     elif action.startswith("turn:"):
-        _, angle = action.split(":")
+        action_parts = action.split(":")
+        angle = action_parts[1]
         robot.turn(int(angle))
     elif action == "parking_complete":
         ev3.speaker.beep()
-        print("Parking complete")
+        ev3.screen.print("Parking complete")
         exit()
     else:
-        print(f"Unknown action: {action}")
+        ev3.screen.print("Unknown action: " + action)
 
 # Main loop
 while True:
-    print("Waiting for action from server...")
+    ev3.screen.print("Waiting for action from server...")
     mbox.wait()  # Wait for the next message from the server
     action = mbox.read()
-    print(f"Received action: {action}")
+    ev3.screen.clear()
+    ev3.screen.print("Received action: " + action)
     execute_action(action)
     wait(100)

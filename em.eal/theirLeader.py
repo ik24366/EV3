@@ -4,13 +4,11 @@ from pybricks.ev3devices import Motor, ColorSensor, UltrasonicSensor
 from pybricks.parameters import Port, Button
 from pybricks.tools import wait, StopWatch
 from pybricks.robotics import DriveBase
-from pybricks.messaging import BluetoothMailboxServer, TextMailbox
-
 
 # Initialize EV3
 ev3 = EV3Brick()
-motor_left = Motor(Port.A)
-motor_right = Motor(Port.B)
+motor_left = Motor(Port.B)
+motor_right = Motor(Port.C)
 
 # drivebase
 WHEEL_DIAMETER = 50  # in millimeters (adjust to your robot)
@@ -19,20 +17,20 @@ AXLE_TRACK = 160     # distance between the centers of the two wheels (adjust to
 robot = DriveBase(motor_left, motor_right, WHEEL_DIAMETER, AXLE_TRACK)
 
 # Sensors
-color_sensor1 = ColorSensor(Port.S1)  # Left sensor
-color_sensor2 = ColorSensor(Port.S2)  # Right sensor
+color_sensor1 = ColorSensor(Port.S2)  # Left sensor
+color_sensor2 = ColorSensor(Port.S3)  # Right sensor
 ultrasonic_sensor_front = UltrasonicSensor(Port.S4)  # Front sensor
-ultrasonic_sensor_back = UltrasonicSensor(Port.S3)  # Back sensor
+ultrasonic_sensor_back = UltrasonicSensor(Port.S1)  # Back sensor
 
 # speed
-speed = 135  # mm/s
+speed = 110  # mm/s
 slspeed = 120
 WTR = 28
 SLT = 20
 
 
 # turn rate
-turn_rate = 80  # degrees per second
+turn_rate = 60  # degrees per second
 
 
 # Define individual tolerance levels for each color
@@ -89,15 +87,7 @@ calibrated_colors = {
     'red': {'sensor1': None, 'sensor2': None}
 }
 
-# Bluetooth setup
-server = BluetoothMailboxServer()
-command_mbox = TextMailbox('command', server)
 
-# Wait for connection from the leader
-ev3.screen.print("Waiting for leader...")
-server.wait_for_connection()
-ev3.screen.clear()
-ev3.screen.print("Connected to leader!")
 
 # Calibration function
 def calibrate_colors():
@@ -407,29 +397,4 @@ calibrate_colors()
 
 # Main loop
 while True:
-
-    # Wait for a command from the leader
-    ev3.screen.print("Waiting for command...")
-    command_mbox.wait()  # Block until a command is received
-    command = command_mbox.read()
-    ev3.screen.clear()
-    ev3.screen.print("Command received: " + command)
-
-    # Handle the received command
-    if command == "SL":
-        ev3.screen.print("Switching lane...")
-        switch_lane()
-    elif command == "Dblue":
-        ev3.screen.print("Handling blue...")
-        handle_blue()
-    elif command == "Dyellow":
-        ev3.screen.print("Handling yellow...")
-        handle_yellow()
-    else:
-        ev3.screen.print("Unknown command: " + command)
-
-
-        continue  # Skip to the next iteration after processing command
-
-
     adjust_movement()
