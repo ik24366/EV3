@@ -4,12 +4,12 @@ from pybricks.ev3devices import Motor, ColorSensor, UltrasonicSensor
 from pybricks.parameters import Port, Button
 from pybricks.tools import wait, StopWatch
 from pybricks.robotics import DriveBase
-from pybricks.messaging import BluetoothMailboxServer, TextMailbox
+from pybricks.messaging import BluetoothMailboxClient, TextMailbox
 
 # Initialize EV3
 ev3 = EV3Brick()
-motor_left = Motor(Port.A)
-motor_right = Motor(Port.B)
+motor_left = Motor(Port.B)
+motor_right = Motor(Port.C)
 
 # drivebase
 WHEEL_DIAMETER = 50  # in millimeters (adjust to your robot)
@@ -18,10 +18,11 @@ AXLE_TRACK = 160     # distance between the centers of the two wheels (adjust to
 robot = DriveBase(motor_left, motor_right, WHEEL_DIAMETER, AXLE_TRACK)
 
 # Sensors
-color_sensor1 = ColorSensor(Port.S1)  # Left sensor
-color_sensor2 = ColorSensor(Port.S2)  # Right sensor
+color_sensor1 = ColorSensor(Port.S2)  # Left sensor
+color_sensor2 = ColorSensor(Port.S3)  # Right sensor
 ultrasonic_sensor_front = UltrasonicSensor(Port.S4)  # Front sensor
-ultrasonic_sensor_back = UltrasonicSensor(Port.S3)  # Back sensor
+ultrasonic_sensor_back = UltrasonicSensor(Port.S1)  # Back sensor
+
 
 # speed
 speed = 110  # mm/s
@@ -30,14 +31,13 @@ WTR = 28
 SLT = 20
 
 
-# Initialize the server for communication
-server = BluetoothMailboxServer()
-command_mailbox = TextMailbox('command', server)
+# Initialize the client and mailbox
+client = BluetoothMailboxClient()
+command_mailbox = TextMailbox('command', client)
 
-# Wait for connection from the follower
-server.wait_for_connection()
-ev3.screen.print("Connected to Follower")
-
+# Connect to the leader EV3
+client.connect('ev3-momo')  # Replace 'ev3-leader' with the leader's Bluetooth name or address
+ev3.screen.print("Connected to Leader")
 
 
 # turn rate
@@ -225,10 +225,6 @@ def handle_blue(sensor_rgb, is_left_sensor):
     calibrated_rgb = calibrated_colors['blue'][sensor]
     if is_color_match(sensor_rgb, calibrated_rgb, BLUE_WEIGHTS, BLUE_TOLERANCE):
         ev3.screen.print("BLUE")
-
-        # Send blue block stop command to the follower
-        command_mailbox.send("stop:BLUE")
-
         robot.drive(speed, 0)
         wait(100)
         robot.stop()
@@ -245,15 +241,9 @@ def handle_yellow(sensor_rgb, is_left_sensor):
         wait(200)
         robot.drive(speed / 2, 0)  # Slow down
         ev3.screen.print("YELLOW")
-
-        # Send yellow zone command to the follower
-        command_mailbox.send("zone:YELLOW")
-
-
         wait(2300)
         red_stopwatch.reset()
         robot.drive(speed, 0)  # Resume normal speed
-
 
 
 # Handle red detection
@@ -302,11 +292,6 @@ def switch_lane():
         robot.drive(slspeed, -(turn_rate - SLT))
         wait(500)
 
-        # Send lane change command to the follower
-        command_mailbox.send("lane:RIGHT")
-
-
-
     elif lane == 'RIGHT':
         # Smooth turn to the left
         robot.drive(slspeed, -(turn_rate - SLT))  # Slow down slightly for smoother turn
@@ -316,11 +301,6 @@ def switch_lane():
         wait(1000)
         robot.drive(slspeed, (turn_rate - SLT))
         wait(500)
-
-        # Send lane change command to the follower
-        command_mailbox.send("lane:LEFT")
-
-
 
 
 
@@ -420,27 +400,47 @@ def adjust_movement():
 
     robot.drive(speed, 0)  # Keep driving forward
 
-
-
-ev3.speaker.beep()  # Beep once when the program starts
-calibrate_colors()  # Perform calibration
-
-# Notify the follower that calibration is complete
-command_mailbox.send("calibration_complete")
-ev3.screen.print("Calibration complete. Waiting for follower...")
-
-# Wait for the follower's ready signal
+# Wait for the leader's calibration complete signal
 while True:
-    follower_response = command_mailbox.wait_new()
-    if follower_response == "follower_ready":
-        ev3.screen.print("Follower is ready. Starting!")
+    leader_signal = command_mailbox.wait_new()
+    if leader_signal == "calibration_complete":
+        ev3.screen.print("Leader calibration complete!")
         break
 
+# Perform calibration
+ev3.speaker.beep()  # Beep once when the program starts
+calibrate_colors()
 
-
+# Notify the leader that the follower is ready
+command_mailbox.send("follower_ready")
+ev3.screen.print("Follower is ready. Waiting for leader to start...")
 
 # Main loop
 while True:
+    command = command_mailbox.wait_new()  # Wait for a new command
+
+    # Parse and act on the command
+    if "lane" in command:
+        new_lane = command.split(":")[1]
+        ev3.screen.print("Change Lane to:", new_lane)
+        if new_lane == 'RIGHT':
+            robot.drive(slspeed, turn_rate)
+            wait(500)
+        elif new_lane == 'LEFT':
+            robot.drive(slspeed, -turn_rate)
+            wait(500)
+
+    elif "zone:YELLOW" in command:
+        ev3.screen.print("Entering Yellow Zone")
+        robot.drive(speed / 2, 0)  # Slow down to half speed
+
+    elif "stop:BLUE" in command:
+        ev3.screen.print("Blue Block Stop")
+        robot.stop()
+        wait(3000)  # Stop for 3 seconds
+        robot.drive(speed, 0)  # Resume driving forward
+
+    # Continue the follower's base movement logic
     adjust_movement()
 
-    
+
