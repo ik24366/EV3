@@ -27,15 +27,26 @@ ultrasonic_sensor_front = UltrasonicSensor(Port.S4)  # Front sensor
 ultrasonic_sensor_back = UltrasonicSensor(Port.S3)  # Back sensor
 
 # speed
-speed = 110  # mm/s
-slspeed = 120
+speed = 90  # mm/s
+slspeed = 90
 WTR = 28
 SLT = 20
+
+w5 = 500
+w10 = 1100
 
 
 # Initialize the server for communication
 server = BluetoothMailboxServer()
-command_mailbox = TextMailbox('command', server)
+
+# Initialize mailboxes for communication
+lane_mailbox = TextMailbox('lane', server)
+yellow_mailbox = TextMailbox('yellow', server)
+blue_mailbox = TextMailbox('blue', server)
+# Initialize mailboxes
+sync_mailbox = TextMailbox('sync', server)  # New mailbox for synchronization
+
+
 
 # Wait for connection from the follower
 server.wait_for_connection()
@@ -45,6 +56,7 @@ ev3.screen.print("Connected to Follower")
 
 # turn rate
 turn_rate = 60  # degrees per second
+slturn_rate = 75
 
 
 # Define individual tolerance levels for each color
@@ -66,7 +78,7 @@ lane = None  # Lane can be 'LEFT' or 'RIGHT'
 
 
 # Object detection distance 
-OBJECT_DETECTION_THRESHOLD = 290  
+OBJECT_DETECTION_THRESHOLD = 230 
 
 
 
@@ -89,6 +101,17 @@ last_turn_direction = 0  # 0 for straight, positive for right, negative for left
 
 parking_mode = False  # Flag for parking mode
 front_ultrasonic_active = True  # Front ultrasonic sensor active by default
+
+
+BDone = {
+    "Blue": False
+}
+
+YDone = {
+    "Yellow": False
+}
+
+
 
 
 # Calibrated colors dictionary
@@ -258,12 +281,10 @@ def handle_green(sensor1_rgb, sensor2_rgb):
 def handle_blue(sensor_rgb, is_left_sensor):
     sensor = 'sensor1' if is_left_sensor else 'sensor2'
     calibrated_rgb = calibrated_colors['blue'][sensor]
-    if is_color_match(sensor_rgb, calibrated_rgb, BLUE_WEIGHTS, BLUE_TOLERANCE):
+    if is_color_match(sensor_rgb, calibrated_rgb, BLUE_WEIGHTS, BLUE_TOLERANCE) and not BDone["Blue"]:
+        BDone["Blue"] = True  # Mark blue as handled
         ev3.screen.print("BLUE")
-
-        # Send blue block stop command to the follower
-        command_mailbox.send("stop:BLUE")
-
+        send_blue_command()
         robot.drive(speed, 0)
         wait(100)
         robot.stop()
@@ -275,16 +296,13 @@ def handle_yellow(sensor_rgb, is_left_sensor):
     global red_stopwatch
     sensor = 'sensor1' if is_left_sensor else 'sensor2'
     calibrated_rgb = calibrated_colors['yellow'][sensor]
-    if is_color_match(sensor_rgb, calibrated_rgb, YELLOW_WEIGHTS, YELLOW_TOLERANCE):
+    if is_color_match(sensor_rgb, calibrated_rgb, YELLOW_WEIGHTS, YELLOW_TOLERANCE) and not YDone["Yellow"]:
+        YDone["Yellow"] = True  # Mark yellow as handled
+        ev3.screen.print("YELLOW")
+        send_yellow_command()
         robot.drive(speed, 0)
         wait(200)
         robot.drive(speed / 2, 0)  # Slow down
-        ev3.screen.print("YELLOW")
-
-        # Send yellow zone command to the follower
-        command_mailbox.send("zone:YELLOW")
-
-
         wait(2300)
         red_stopwatch.reset()
         robot.drive(speed, 0)  # Resume normal speed
@@ -322,35 +340,60 @@ def handle_lane_switch():
     while Button.LEFT in ev3.buttons.pressed() or Button.RIGHT in ev3.buttons.pressed():
         wait(10)
 
+
+
+
+
 def switch_lane():
     global lane
     if lane == 'LEFT':
-        # Smooth turn to the right
-        robot.drive(slspeed, (turn_rate - SLT))  # Slow down slightly for smoother turn
-        wait(500)# Adjust timing based on track
-        lane = 'RIGHT'  # Update to RIGHT lane
+
+        send_lane_command("RIGHT")
+
+        # Stop the robot before turning
+        robot.stop()
+        wait(200)
+
+        # Turn 90 degrees to the right
+        robot.turn(70)  # Adjust this if 90 degrees needs calibration
+        wait(200)
+
+        # Move forward for 200ms
         robot.drive(slspeed, 0)
-        wait(1000)
-        robot.drive(slspeed, -(turn_rate - SLT))
-        wait(500)
+        wait(w10)
+        robot.stop()
 
-        # Send lane change command to the follower
-        command_mailbox.send("lane:RIGHT")
+        # Turn back 90 degrees to align with the new lane
+        robot.turn(-70)
+        wait(400)
 
-
+        # Update the lane
+        lane = 'RIGHT'
 
     elif lane == 'RIGHT':
-        # Smooth turn to the left
-        robot.drive(slspeed, -(turn_rate - SLT))  # Slow down slightly for smoother turn
-        wait(500) # Adjust timing based on track
-        lane = 'LEFT'  # Update to LEFT lane
-        robot.drive(slspeed, 0)  # Resume driving straight
-        wait(1000)
-        robot.drive(slspeed, (turn_rate - SLT))
-        wait(500)
 
-        # Send lane change command to the follower
-        command_mailbox.send("lane:LEFT")
+        send_lane_command("LEFT")
+
+        # Stop the robot before turning
+        robot.stop()
+        wait(200)
+
+        # Turn 90 degrees to the left
+        robot.turn(-70)  # Adjust this if 90 degrees needs calibration
+        wait(200)
+
+        # Move forward for 200ms
+        robot.drive(slspeed, 0)
+        wait(w10)
+        robot.stop()
+
+        # Turn back 90 degrees to align with the new lane
+        robot.turn(70)
+        wait(400)
+
+        # Update the lane
+        lane = 'LEFT'
+
 
 
 
@@ -408,6 +451,27 @@ def handle_parking():
                     break
 
 
+# Send commands to followers in relevant scenarios
+def send_lane_command(new_lane):
+    lane_mailbox.send("lane:" + new_lane)
+    ev3.screen.print("Sent Lane Command: " + new_lane)
+
+def send_yellow_command():
+    yellow_mailbox.send("zone:YELLOW")
+    ev3.screen.print("Sent Yellow Zone Command")
+
+def send_blue_command():
+    blue_mailbox.send("stop:BLUE")
+    ev3.screen.print("Sent Blue Block Stop Command")
+
+lane_switch_counter = 0  # Counter for lane switch commands
+
+def send_lane_command(new_lane):
+    global lane_switch_counter
+    lane_switch_counter += 1  # Increment counter for each new command
+    lane_mailbox.send("lane:" + new_lane + ":" + str(lane_switch_counter))
+
+
 
 
 # Main loop function
@@ -459,17 +523,22 @@ ev3.speaker.beep()  # Beep once when the program starts
 # Perform setup for calibration (replace calibrate_colors call)
 setup_calibration()
 
-# Notify the follower that calibration is complete
-command_mailbox.send("calibration_complete")
-ev3.screen.print("Calibration complete. Waiting for follower...")
 
-# Leader: Wait for the follower's ready signal
+# Notify follower to start calibration
+ev3.screen.print("Notifying Follower...")
+sync_mailbox.send("calibrate")
+
+# Wait for follower to confirm readiness
+ev3.screen.print("Waiting for Follower Ready...")
 while True:
-    follower_response = command_mailbox.wait_new()
+    follower_response = sync_mailbox.wait_new()
     if follower_response == "follower_ready":
-        ev3.screen.print("Follower is ready. Starting!")
-        command_mailbox.send("start")  # Send the "start" command
+        ev3.screen.print(" Ready!")
         break
+
+# Send the "start" signal
+sync_mailbox.send("start")
+ev3.screen.print("Start")
 
 # Main loop
 while True:

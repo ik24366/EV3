@@ -28,23 +28,46 @@ ultrasonic_sensor_back = UltrasonicSensor(Port.S1)  # Back sensor
 
 
 # speed
-speed = 110  # mm/s
-slspeed = 120
-WTR = 28
+speed = 90  # mm/s
+slspeed = 90
+WTR = 32
 SLT = 20
+
+w5 = 500
+w10 = 1000
 
 
 # Initialize the client and mailbox
 client = BluetoothMailboxClient()
-command_mailbox = TextMailbox('command', client)
+
+# Initialize mailboxes for communication
+lane_mailbox = TextMailbox('lane', client)
+yellow_mailbox = TextMailbox('yellow', client)
+blue_mailbox = TextMailbox('blue', client)
+# Initialize mailboxes
+sync_mailbox = TextMailbox('sync', client)  # New mailbox for synchronization
+
 
 # Connect to the leader EV3
 client.connect('ev3-momo')  # Replace 'ev3-leader' with the leader's Bluetooth name or address
 ev3.screen.print("Connected to Leader")
 
 
+# Initialize dictionaries for tracking command handling
+BDone = {
+    "Blue": False
+}
+
+YDone = {
+    "Yellow": False
+}
+
+lane_switching = False  # Track if lane switching is in progress
+
+
 # turn rate
 turn_rate = 60  # degrees per second
+slturn_rate = 75
 
 
 # Define individual tolerance levels for each color
@@ -168,7 +191,7 @@ def calibrate_colors():
 
 def setup_calibration():
     ev3.screen.print("Up for Recalibration")
-    for _ in range(80):  # Wait for 5 seconds for manual recalibration option
+    for _ in range(50):  # Wait for 5 seconds for manual recalibration option
         if Button.UP in ev3.buttons.pressed():  # Use UP button for calibration
             calibrate_colors()
             save_calibration_data()
@@ -318,24 +341,48 @@ def handle_lane_switch():
 def switch_lane():
     global lane
     if lane == 'LEFT':
-        # Smooth turn to the right
-        robot.drive(slspeed, (turn_rate - SLT))  # Slow down slightly for smoother turn
-        wait(500)# Adjust timing based on track
-        lane = 'RIGHT'  # Update to RIGHT lane
+        # Stop the robot before turning
+        robot.stop()
+        wait(200)
+
+        # Turn 90 degrees to the right
+        robot.turn(70)  # Adjust this if 90 degrees needs calibration
+        wait(200)
+
+        # Move forward for 200ms
         robot.drive(slspeed, 0)
-        wait(1000)
-        robot.drive(slspeed, -(turn_rate - SLT))
-        wait(500)
+        wait(w10)
+        robot.stop()
+        wait(300)
+
+        # Turn back 90 degrees to align with the new lane
+        robot.turn(-66)
+        wait(400)
+
+        # Update the lane
+        lane = 'RIGHT'
 
     elif lane == 'RIGHT':
-        # Smooth turn to the left
-        robot.drive(slspeed, -(turn_rate - SLT))  # Slow down slightly for smoother turn
-        wait(500) # Adjust timing based on track
-        lane = 'LEFT'  # Update to LEFT lane
-        robot.drive(slspeed, 0)  # Resume driving straight
-        wait(1000)
-        robot.drive(slspeed, (turn_rate - SLT))
-        wait(500)
+        # Stop the robot before turning
+        robot.stop()
+        wait(200)
+
+        # Turn 90 degrees to the left
+        robot.turn(-70)  # Adjust this if 90 degrees needs calibration
+        wait(200)
+
+        # Move forward for 200ms
+        robot.drive(slspeed, 0)
+        wait(w10)
+        robot.stop()
+        wait(300)
+
+        # Turn back 90 degrees to align with the new lane
+        robot.turn(66)
+        wait(400)
+
+        # Update the lane
+        lane = 'LEFT'
 
 
 
@@ -390,7 +437,56 @@ def handle_parking():
                     wait(999999)
                     break
 
+def maintain_distance():
+    global speed, lane_switching
+    if lane_switching:
+        return  # Skip if lane switching is in progress
+     
+    # Measure distance to the leader using the front ultrasonic sensor
+    distance_to_leader = ultrasonic_sensor_front.distance()
 
+    # Desired distance range
+    stop = 60
+    min_distance = 80  # Minimum safe distance (in mm)
+    max_distance = 200  # Maximum safe distance (in mm)
+
+    # Adjust speed dynamically based on the distance
+    if distance_to_leader < min_distance:
+        # Too close, slow down or stop
+        speed = max(70, speed - 10)  # Decrease speed gradually
+
+    elif distance_to_leader > max_distance:
+        # Too far, speed up
+        speed = min(97, speed + 10)  # Increase speed gradually
+
+    elif distance_to_leader < stop:
+        robot.stop()
+        wait(100)
+        
+
+    # Set robot speed accordingly
+    robot.drive(speed, 0)
+
+
+lane_counter = 0  # Tracks the last processed lane switch command
+
+def process_lane_command(command):
+    global lane, lane_counter
+    try:
+        # Parse the command: "lane:<LEFT/RIGHT>:<counter>"
+        parts = command.split(":")
+        if len(parts) == 3:
+            new_lane = parts[1]
+            command_counter = int(parts[2])
+
+            # Check if the command counter is greater than the current lane_counter
+            if command_counter > lane_counter:
+                lane_counter = command_counter  # Update the counter
+                if new_lane != lane:
+                    switch_lane()  # Execute lane switch logic
+                    lane = new_lane  # Update the current lane
+    except Exception as e:
+        ev3.screen.print("Error processing lane command: " + str(e))
 
 
 # Main loop function
@@ -403,16 +499,16 @@ def adjust_movement():
     handle_white(rgb1, True)   # True indicates the left sensor
     handle_white(rgb2, False)  # False indicates the right sensor
     
-    detect_object() 
+    #detect_object() 
 
-    handle_blue(rgb1, True)    
-    handle_blue(rgb2, False)  
+    #handle_blue(rgb1, True)    
+    #handle_blue(rgb2, False)  
 
-    handle_yellow(rgb1, True)  
-    handle_yellow(rgb2, False) 
+    #handle_yellow(rgb1, True)  
+    #handle_yellow(rgb2, False) 
     
-    handle_red(rgb1, True)
-    handle_red(rgb2, False)
+    #handle_red(rgb1, True)
+    #handle_red(rgb2, False)
 
 
     # Call the lane switch handler to check for button presses
@@ -435,62 +531,71 @@ def adjust_movement():
 
     robot.drive(speed, 0)  # Keep driving forward
 
-# Follower: Wait for the leader's calibration complete signal
-while True:
-    leader_signal = command_mailbox.wait_new()
-    if leader_signal == "calibration_complete":
-        ev3.screen.print("Leader calibration complete!")
-        break
 
 # Perform calibration
 ev3.speaker.beep()  # Beep once when the program starts
 
 
-# Perform setup for calibration (replace calibrate_colors call)
-setup_calibration()
-
-# Notify the leader that the follower is ready
-command_mailbox.send("follower_ready")
-ev3.screen.print("Follower is ready. Waiting for leader to start...")
-
-# Wait for the "start" command
+# Wait for calibration signal
+ev3.screen.print("Waiting for Calibration Signal...")
 while True:
-    command = command_mailbox.wait_new()
-    if command == "start":
-        ev3.screen.print("Start command received. Following leader.")
+    command = sync_mailbox.wait_new()
+    if command == "calibrate":
+        ev3.screen.print("Calibration Signal Received.")
         break
 
 
+# Perform setup for calibration (replace calibrate_colors call)
+setup_calibration()
+
+# Notify leader of readiness
+sync_mailbox.send("follower_ready")
+ev3.screen.print("Signal Sent")
+
+# Wait for start signal
+ev3.screen.print("Waiting Start")
+while True:
+    command = sync_mailbox.wait_new()
+    if command == "start":
+        ev3.screen.print("Start Signal Received. Beginning Operation.")
+        break
 
 # Main loop
 while True:
     # Continuously adjust movement
     adjust_movement()
+
+    maintain_distance()
     
-    # Check for new commands from the leader
     try:
-        command = command_mailbox.read()  # Non-blocking check for new commands
-        if command:  # If a command is received, process it
-            if "lane" in command:
-                new_lane = command.split(":")[1]
-                ev3.screen.print("Change Lane to:", new_lane)
-                if new_lane == 'RIGHT':
-                    robot.drive(slspeed, turn_rate)
-                    wait(500)
-                elif new_lane == 'LEFT':
-                    robot.drive(slspeed, -turn_rate)
-                    wait(500)
+        # Read lane mailbox for new commands
+        lane_command = lane_mailbox.read()
+        if lane_command:
+            process_lane_command(lane_command)
 
-            elif "zone:YELLOW" in command:
-                ev3.screen.print("Entering Yellow Zone")
-                robot.drive(speed / 2, 0)  # Slow down to half speed
 
-            elif "stop:BLUE" in command:
-                ev3.screen.print("Blue Block Stop")
-                robot.stop()
-                wait(3000)  # Stop for 3 seconds
-                robot.drive(speed, 0)  # Resume driving forward
+        yellow_command = yellow_mailbox.read()
+        if yellow_command and not YDone["Yellow"]:  # Check if the yellow command has not been processed
+            ev3.screen.print("Yellow Zone Command Received")
+            robot.drive(speed, 0)
+            wait(200)
+            robot.drive(speed / 2, 0)  # Slow down
+            wait(2300)
+            red_stopwatch.reset()
+            robot.drive(speed, 0)  # Resume normal speed
+            YDone["Yellow"] = True  # Mark as handled
+
+        # Blue mailbox: Process only once
+        blue_command = blue_mailbox.read()
+        if blue_command and not BDone["Blue"]:  # Check if the blue command has not been processed
+            ev3.screen.print("Blue Block Stop Detected")
+            robot.drive(speed, 0)
+            wait(100)
+            robot.stop()
+            wait(3000)
+            robot.drive(speed, 0)  # Resume driving forward
+            BDone["Blue"] = True  # Mark as handled
+
     except Exception as e:
-        # Catch any unexpected mailbox errors to prevent crashes
-        ev3.screen.print("Error:", str(e))
+        ev3.screen.print("Error: " + str(e))
 
