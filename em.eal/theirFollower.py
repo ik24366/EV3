@@ -11,8 +11,8 @@ import json
 
 # Initialize EV3
 ev3 = EV3Brick()
-motor_left = Motor(Port.B)
-motor_right = Motor(Port.C)
+motor_left = Motor(Port.A)
+motor_right = Motor(Port.B)
 
 # drivebase
 WHEEL_DIAMETER = 50  # in millimeters (adjust to your robot)
@@ -21,11 +21,10 @@ AXLE_TRACK = 160     # distance between the centers of the two wheels (adjust to
 robot = DriveBase(motor_left, motor_right, WHEEL_DIAMETER, AXLE_TRACK)
 
 # Sensors
-color_sensor1 = ColorSensor(Port.S2)  # Left sensor
-color_sensor2 = ColorSensor(Port.S3)  # Right sensor
+color_sensor1 = ColorSensor(Port.S1)  # Left sensor
+color_sensor2 = ColorSensor(Port.S2)  # Right sensor
 ultrasonic_sensor_front = UltrasonicSensor(Port.S4)  # Front sensor
-ultrasonic_sensor_back = UltrasonicSensor(Port.S1)  # Back sensor
-
+ultrasonic_sensor_back = UltrasonicSensor(Port.S3)  # Back sensor
 
 # speed
 speed = 90  # mm/s
@@ -46,6 +45,14 @@ yellow_mailbox = TextMailbox('yellow', client)
 blue_mailbox = TextMailbox('blue', client)
 # Initialize mailboxes
 sync_mailbox = TextMailbox('sync', client)  # New mailbox for synchronization
+parking_mailbox = TextMailbox('parking', client)  # New mailbox for parking mode
+
+
+
+start_parking_mailbox = TextMailbox('start_parking', client)
+turn_mailbox = TextMailbox('turn', client)
+reverse_mailbox = TextMailbox('reverse', client)
+parked_mailbox = TextMailbox('parked', client)
 
 
 # Connect to the leader EV3
@@ -356,7 +363,7 @@ def switch_lane():
         wait(300)
 
         # Turn back 90 degrees to align with the new lane
-        robot.turn(-66)
+        robot.turn(-60)
         wait(400)
 
         # Update the lane
@@ -378,7 +385,7 @@ def switch_lane():
         wait(300)
 
         # Turn back 90 degrees to align with the new lane
-        robot.turn(66)
+        robot.turn(60)
         wait(400)
 
         # Update the lane
@@ -415,28 +422,38 @@ def enter_parking_mode():
 
 
 
-# Parking behavior
+
+# Parking behavior for the follower
 def handle_parking():
-    global parking_mode, front_ultrasonic_active
+    global parking_mode
     if parking_mode:
-        back_distance = ultrasonic_sensor_back.distance()
-        ev3.screen.print("Back distance:", back_distance)
-        if back_distance < OBJECT_DETECTION_THRESHOLD_Park_BACK:  
+        # Wait for the start command
+        if start_parking_mailbox.read() == "start":
+            ev3.screen.print("Follower: Starting parking")
             robot.drive(speed, 0)
             wait(1000)
-            robot.turn(65)  # Turn 90 degrees to the right
-            front_ultrasonic_active = True  # Activate the front sensor
-            ev3.screen.print("Front sensor active")
-            robot.drive(speed, 0)
-            while True:
-                front_distance = ultrasonic_sensor_front.distance()
-                ev3.screen.print("Distance:", front_distance)
-                if front_distance <= OBJECT_DETECTION_THRESHOLD_Park_FRONT:  
-                    ev3.screen.print("Parking Complete")
-                    robot.stop()
-                    wait(999999)
-                    break
 
+        # Wait for the turn command
+        if turn_mailbox.read() == "turn":
+            ev3.screen.print("Follower: Turning")
+            robot.turn(-65)  # Turn 90 degrees to the right
+
+        # Wait for the reverse command
+        if reverse_mailbox.read() == "reverse":
+            ev3.screen.print("Follower: Reversing")
+            robot.drive(-speed, 0)
+            wait(2000)
+
+        # Wait for the parked confirmation
+        if parked_mailbox.read() == "parked":
+            ev3.screen.print("Follower: Parking complete")
+            ev3.speaker.beep()
+            robot.stop()
+            wait(999999)
+
+
+
+    
 def maintain_distance():
     global speed, lane_switching
     if lane_switching:
@@ -457,11 +474,11 @@ def maintain_distance():
 
     elif distance_to_leader > max_distance:
         # Too far, speed up
-        speed = min(97, speed + 10)  # Increase speed gradually
+        speed = min(92, speed + 10)  # Increase speed gradually
 
     elif distance_to_leader < stop:
         robot.stop()
-        wait(100)
+        wait(500)
         
 
     # Set robot speed accordingly
@@ -522,12 +539,6 @@ def adjust_movement():
         else:
             distance = ultrasonic_sensor_back.distance()  # Back sensor distance
         ev3.screen.print("Dist:", distance)  # Display the distance dynamically
-
-    if parking_mode:
-        handle_parking()
-    else:
-        robot.drive(speed, 0)
-
 
     robot.drive(speed, 0)  # Keep driving forward
 
@@ -595,6 +606,12 @@ while True:
             wait(3000)
             robot.drive(speed, 0)  # Resume driving forward
             BDone["Blue"] = True  # Mark as handled
+
+        parking_command = parking_mailbox.read()
+        if parking_command == "parking_mode_on":
+            ev3.screen.print("parking mode!")
+            # Add follower-specific parking logic here
+            handle_parking()
 
     except Exception as e:
         ev3.screen.print("Error: " + str(e))

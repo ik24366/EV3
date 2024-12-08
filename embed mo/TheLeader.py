@@ -45,6 +45,14 @@ yellow_mailbox = TextMailbox('yellow', server)
 blue_mailbox = TextMailbox('blue', server)
 # Initialize mailboxes
 sync_mailbox = TextMailbox('sync', server)  # New mailbox for synchronization
+parking_mailbox = TextMailbox('parking', server)  # New mailbox for parking mode
+
+
+
+start_parking_mailbox = TextMailbox('start_parking', server)
+turn_mailbox = TextMailbox('turn', server)
+reverse_mailbox = TextMailbox('reverse', server)
+parked_mailbox = TextMailbox('parked', server)
 
 
 
@@ -110,6 +118,10 @@ BDone = {
 YDone = {
     "Yellow": False
 }
+
+red_handled = {
+    "Red":False
+  }  # Global flag for red detection
 
 
 
@@ -293,7 +305,7 @@ def handle_blue(sensor_rgb, is_left_sensor):
 
 # Handle yellow color detection
 def handle_yellow(sensor_rgb, is_left_sensor):
-    global red_stopwatch
+    global red_stopwatch, red_handled
     sensor = 'sensor1' if is_left_sensor else 'sensor2'
     calibrated_rgb = calibrated_colors['yellow'][sensor]
     if is_color_match(sensor_rgb, calibrated_rgb, YELLOW_WEIGHTS, YELLOW_TOLERANCE) and not YDone["Yellow"]:
@@ -315,11 +327,13 @@ def handle_red(sensor_rgb, is_left_sensor):
     sensor = 'sensor1' if is_left_sensor else 'sensor2'
     calibrated_rgb = calibrated_colors['red'][sensor]
     
-    if is_color_match(sensor_rgb, calibrated_rgb, RED_WEIGHTS, RED_TOLERANCE):
+    if is_color_match(sensor_rgb, calibrated_rgb, RED_WEIGHTS, RED_TOLERANCE) and not red_handled["Red"]:
         if red_stopwatch.time() > RED_DETECTION_DELAY and not parking_mode:
             ev3.screen.print("Parking...")
+            
             enter_parking_mode()  # Enter parking mode
 
+            parking_mailbox.send("parking_mode_on")  # Notify follower
             
             red_stopwatch.reset()  # Reset stopwatch after detecting red
 
@@ -428,27 +442,28 @@ def enter_parking_mode():
 
 
 
-# Parking behavior
+# Parking behavior for the leader
 def handle_parking():
     global parking_mode, front_ultrasonic_active
     if parking_mode:
         back_distance = ultrasonic_sensor_back.distance()
-        ev3.screen.print("Back distance:", back_distance)
-        if back_distance < OBJECT_DETECTION_THRESHOLD_Park_BACK:  
+        ev3.screen.print("Back distance: " + str(back_distance))
+        if back_distance < OBJECT_DETECTION_THRESHOLD_Park_BACK:
+            start_parking_mailbox.send("start")
             robot.drive(speed, 0)
-            wait(1000)
-            robot.turn(65)  # Turn 90 degrees to the right
-            front_ultrasonic_active = True  # Activate the front sensor
-            ev3.screen.print("Front sensor active")
-            robot.drive(speed, 0)
-            while True:
-                front_distance = ultrasonic_sensor_front.distance()
-                ev3.screen.print("Distance:", front_distance)
-                if front_distance <= OBJECT_DETECTION_THRESHOLD_Park_FRONT:  
-                    ev3.screen.print("Parking Complete")
-                    robot.stop()
-                    wait(999999)
-                    break
+            wait(3000)
+
+            turn_mailbox.send("turn")
+            robot.turn(-65)  # Turn 90 degrees to the right
+
+            reverse_mailbox.send("reverse")
+            robot.drive(-speed, 0)
+            wait(2000)
+
+            parked_mailbox.send("parked")
+            ev3.speaker.beep()
+            robot.stop()
+            wait(999999)
 
 
 # Send commands to followers in relevant scenarios
