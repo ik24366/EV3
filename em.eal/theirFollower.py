@@ -5,6 +5,9 @@ from pybricks.parameters import Port, Button
 from pybricks.tools import wait, StopWatch
 from pybricks.robotics import DriveBase
 from pybricks.messaging import BluetoothMailboxClient, TextMailbox
+import os
+import json
+
 
 # Initialize EV3
 ev3 = EV3Brick()
@@ -98,13 +101,32 @@ calibrated_colors = {
     'red': {'sensor1': None, 'sensor2': None}
 }
 
+# File to save calibration data
+CALIBRATION_FILE = "calibration_data.json"
+
+# Save calibration data to a file
+def save_calibration_data():
+    with open(CALIBRATION_FILE, "w") as f:
+        json.dump(calibrated_colors, f)
+    ev3.screen.print("Calibration Saved")
+
+# Load calibration data from a file
+def load_calibration_data():
+    global calibrated_colors
+    try:
+        with open(CALIBRATION_FILE, "r") as f:
+            calibrated_colors = json.load(f)
+        ev3.screen.print("Calibration Loaded")
+        return True
+    except (OSError, IOError, json.JSONDecodeError):
+        ev3.screen.print("No Calibration Found")
+        return False
 
 
 # Calibration function
 def calibrate_colors():
     colors = ['black', 'white', 'green', 'blue', 'yellow', 'red']
     num_samples = 8  # Number of samples to take for each color
-
 
     for color in colors:
         ev3.screen.clear()
@@ -140,11 +162,24 @@ def calibrate_colors():
         calibrated_colors[color]['sensor1'] = avg_rgb1
         calibrated_colors[color]['sensor2'] = avg_rgb2
 
-
     ev3.screen.clear()
-    ev3.screen.print("Calibration")
-    ev3.screen.print("Completed")
+    ev3.screen.print("Calibration Completed")
     wait(2000)
+
+def setup_calibration():
+    ev3.screen.print("Up for Recalibration")
+    for _ in range(80):  # Wait for 5 seconds for manual recalibration option
+        if Button.UP in ev3.buttons.pressed():  # Use UP button for calibration
+            calibrate_colors()
+            save_calibration_data()
+            return
+        wait(100)
+    # If no recalibration, try to load existing data
+    if not load_calibration_data():
+        ev3.screen.print("No Calibration Found")
+        calibrate_colors()
+        save_calibration_data()
+
 
 # Check if the detected color matches the calibrated value
 def is_color_match(sensor_rgb, calibrated_rgb, weights, tolerance):
@@ -381,7 +416,7 @@ def adjust_movement():
 
 
     # Call the lane switch handler to check for button presses
-    handle_lane_switch()
+    #handle_lane_switch()
 
     if lane:
         ev3.screen.clear()
@@ -400,7 +435,7 @@ def adjust_movement():
 
     robot.drive(speed, 0)  # Keep driving forward
 
-# Wait for the leader's calibration complete signal
+# Follower: Wait for the leader's calibration complete signal
 while True:
     leader_signal = command_mailbox.wait_new()
     if leader_signal == "calibration_complete":
@@ -409,38 +444,53 @@ while True:
 
 # Perform calibration
 ev3.speaker.beep()  # Beep once when the program starts
-calibrate_colors()
+
+
+# Perform setup for calibration (replace calibrate_colors call)
+setup_calibration()
 
 # Notify the leader that the follower is ready
 command_mailbox.send("follower_ready")
 ev3.screen.print("Follower is ready. Waiting for leader to start...")
 
+# Wait for the "start" command
+while True:
+    command = command_mailbox.wait_new()
+    if command == "start":
+        ev3.screen.print("Start command received. Following leader.")
+        break
+
+
+
 # Main loop
 while True:
-    command = command_mailbox.wait_new()  # Wait for a new command
-
-    # Parse and act on the command
-    if "lane" in command:
-        new_lane = command.split(":")[1]
-        ev3.screen.print("Change Lane to:", new_lane)
-        if new_lane == 'RIGHT':
-            robot.drive(slspeed, turn_rate)
-            wait(500)
-        elif new_lane == 'LEFT':
-            robot.drive(slspeed, -turn_rate)
-            wait(500)
-
-    elif "zone:YELLOW" in command:
-        ev3.screen.print("Entering Yellow Zone")
-        robot.drive(speed / 2, 0)  # Slow down to half speed
-
-    elif "stop:BLUE" in command:
-        ev3.screen.print("Blue Block Stop")
-        robot.stop()
-        wait(3000)  # Stop for 3 seconds
-        robot.drive(speed, 0)  # Resume driving forward
-
-    # Continue the follower's base movement logic
+    # Continuously adjust movement
     adjust_movement()
+    
+    # Check for new commands from the leader
+    try:
+        command = command_mailbox.read()  # Non-blocking check for new commands
+        if command:  # If a command is received, process it
+            if "lane" in command:
+                new_lane = command.split(":")[1]
+                ev3.screen.print("Change Lane to:", new_lane)
+                if new_lane == 'RIGHT':
+                    robot.drive(slspeed, turn_rate)
+                    wait(500)
+                elif new_lane == 'LEFT':
+                    robot.drive(slspeed, -turn_rate)
+                    wait(500)
 
+            elif "zone:YELLOW" in command:
+                ev3.screen.print("Entering Yellow Zone")
+                robot.drive(speed / 2, 0)  # Slow down to half speed
+
+            elif "stop:BLUE" in command:
+                ev3.screen.print("Blue Block Stop")
+                robot.stop()
+                wait(3000)  # Stop for 3 seconds
+                robot.drive(speed, 0)  # Resume driving forward
+    except Exception as e:
+        # Catch any unexpected mailbox errors to prevent crashes
+        ev3.screen.print("Error:", str(e))
 

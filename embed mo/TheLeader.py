@@ -5,6 +5,9 @@ from pybricks.parameters import Port, Button
 from pybricks.tools import wait, StopWatch
 from pybricks.robotics import DriveBase
 from pybricks.messaging import BluetoothMailboxServer, TextMailbox
+import os
+import json
+
 
 # Initialize EV3
 ev3 = EV3Brick()
@@ -98,13 +101,32 @@ calibrated_colors = {
     'red': {'sensor1': None, 'sensor2': None}
 }
 
+# File to save calibration data
+CALIBRATION_FILE = "calibration_data.json"
+
+# Save calibration data to a file
+def save_calibration_data():
+    with open(CALIBRATION_FILE, "w") as f:
+        json.dump(calibrated_colors, f)
+    ev3.screen.print("Calibration Saved")
+
+# Load calibration data from a file
+def load_calibration_data():
+    global calibrated_colors
+    try:
+        with open(CALIBRATION_FILE, "r") as f:
+            calibrated_colors = json.load(f)
+        ev3.screen.print("Calibration Loaded")
+        return True
+    except (OSError, IOError, json.JSONDecodeError):
+        ev3.screen.print("No Calibration Found")
+        return False
 
 
 # Calibration function
 def calibrate_colors():
     colors = ['black', 'white', 'green', 'blue', 'yellow', 'red']
     num_samples = 8  # Number of samples to take for each color
-
 
     for color in colors:
         ev3.screen.clear()
@@ -140,11 +162,24 @@ def calibrate_colors():
         calibrated_colors[color]['sensor1'] = avg_rgb1
         calibrated_colors[color]['sensor2'] = avg_rgb2
 
-
     ev3.screen.clear()
-    ev3.screen.print("Calibration")
-    ev3.screen.print("Completed")
+    ev3.screen.print("Calibration Completed")
     wait(2000)
+
+def setup_calibration():
+    ev3.screen.print("Up for Recalibration")
+    for _ in range(80):  # Wait for 5 seconds for manual recalibration option
+        if Button.UP in ev3.buttons.pressed():  # Use UP button for calibration
+            calibrate_colors()
+            save_calibration_data()
+            return
+        wait(100)
+    # If no recalibration, try to load existing data
+    if not load_calibration_data():
+        ev3.screen.print("No Calibration Found")
+        calibrate_colors()
+        save_calibration_data()
+
 
 # Check if the detected color matches the calibrated value
 def is_color_match(sensor_rgb, calibrated_rgb, weights, tolerance):
@@ -271,24 +306,21 @@ def handle_red(sensor_rgb, is_left_sensor):
             red_stopwatch.reset()  # Reset stopwatch after detecting red
 
 
+# Function to handle lane switching
 def handle_lane_switch():
     global lane
-    # Check if the CENTER button is pressed
-    if Button.CENTER in ev3.buttons.pressed():
-        # Toggle the lane
-        if lane == 'LEFT':
-            lane = 'RIGHT'
-        else:
-            lane = 'LEFT'
-
-        # Provide feedback on the EV3 screen
+    # Check if the LEFT or RIGHT button is pressed
+    if Button.LEFT in ev3.buttons.pressed():  # Use LEFT button for lane switching
+        lane = 'LEFT'
         ev3.screen.clear()
-        ev3.screen.print("Lane switched!")
-        ev3.screen.print("Current lane: {}".format(lane))
-
-        # Wait until the button is released to prevent multiple toggles
-        while Button.CENTER in ev3.buttons.pressed():
-            wait(10)
+        ev3.screen.print("Lane switched to LEFT")
+    elif Button.RIGHT in ev3.buttons.pressed():  # Use RIGHT button for lane switching
+        lane = 'RIGHT'
+        ev3.screen.clear()
+        ev3.screen.print("Lane switched to RIGHT")
+    # Wait until the button is released to prevent multiple toggles
+    while Button.LEFT in ev3.buttons.pressed() or Button.RIGHT in ev3.buttons.pressed():
+        wait(10)
 
 def switch_lane():
     global lane
@@ -423,21 +455,21 @@ def adjust_movement():
 
 
 ev3.speaker.beep()  # Beep once when the program starts
-calibrate_colors()  # Perform calibration
+
+# Perform setup for calibration (replace calibrate_colors call)
+setup_calibration()
 
 # Notify the follower that calibration is complete
 command_mailbox.send("calibration_complete")
 ev3.screen.print("Calibration complete. Waiting for follower...")
 
-# Wait for the follower's ready signal
+# Leader: Wait for the follower's ready signal
 while True:
     follower_response = command_mailbox.wait_new()
     if follower_response == "follower_ready":
         ev3.screen.print("Follower is ready. Starting!")
+        command_mailbox.send("start")  # Send the "start" command
         break
-
-
-
 
 # Main loop
 while True:
